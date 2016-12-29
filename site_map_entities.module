@@ -1,0 +1,233 @@
+<?php
+
+/**
+ * @file
+ *   Main file with hooks.
+ */
+
+define('SITE_MAP_ENTITIES_FIELD_OFF', 0);
+define('SITE_MAP_ENTITIES_FIELD_DEFAULT', 1);
+define('SITE_MAP_ENTITIES_ADD_CHECKED', 1);
+define('SITE_MAP_ENTITIES_ADD_UNCHECKED', 0);
+define('SITE_MAP_ENTITIES_ADD_DEFAULT', 2);
+define('SITE_MAP_ENTITIES_ADD_ALL', 3);
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function site_map_entities_form_site_map_admin_settings_form_alter(&$form, &$form_state, $form_id) {
+  $settings = variable_get('site_map_entities_settings', array());
+
+  $form['site_map_entities'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Entities settings',
+  );
+
+  $fields_info = field_info_fields();
+  $boolean_fields = array(
+    SITE_MAP_ENTITIES_FIELD_OFF => '- Disable -',
+    SITE_MAP_ENTITIES_FIELD_DEFAULT => '- Use default -',
+  );
+  foreach ($fields_info as $field_name => $field_info_field) {
+    if ($field_info_field['type'] == 'list_boolean') {
+      $boolean_fields[$field_name] = $field_name;
+    }
+  }
+
+  $prefix = "site_map_entities_";
+  $form['site_map_entities'][$prefix . 'type'] = array(
+    '#type' => 'select',
+    '#title' => 'Listing type',
+    '#description' => 'Select how to entities will be added to Site Map.',
+    '#options' => array(
+      SITE_MAP_ENTITIES_ADD_ALL => 'Add all',
+      SITE_MAP_ENTITIES_ADD_UNCHECKED => 'Add all except checked',
+      SITE_MAP_ENTITIES_ADD_CHECKED => 'Add only checked',
+    ),
+    '#default_value' => isset($settings['defaults']['type']) ? $settings['defaults']['type'] : SITE_MAP_ENTITIES_ADD_ALL,
+  );
+
+  $form['site_map_entities'][$prefix . 'default_field'] = array(
+    '#type' => 'select',
+    '#title' => 'Default field',
+    '#description' => 'Default field which will be using for restriction. Here is only appears boolean fields.',
+    '#options' => $boolean_fields,
+    '#default_value' => isset($settings['defaults']['field']) ? $settings['defaults']['field'] : SITE_MAP_ENTITIES_FIELD_OFF,
+  );
+  unset($form['site_map_entities'][$prefix . 'default_field']['#options'][SITE_MAP_ENTITIES_FIELD_DEFAULT]);
+
+  $entity_info = entity_get_info();
+  foreach ($entity_info as $entity_name => $entity_type_info) {
+    $form['site_map_entities'][$entity_name] = array(
+      '#type' => 'fieldset',
+      '#title' => $entity_type_info['label'] . " ($entity_name)",
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+
+    $entity_bundles = &$entity_type_info['bundles'];
+    foreach ($entity_bundles as $bundle_name => $bundle_info) {
+      $settings_for_bundle = isset($settings['entities'][$entity_name][$bundle_name]) ? $settings['entities'][$entity_name][$bundle_name] : array();
+      $form['site_map_entities'][$entity_name][$bundle_name] = array(
+        '#type' => 'fieldset',
+        '#title' => $bundle_info['label'] . " ($bundle_name)",
+      );
+
+      $prefix = "site_map_entities-$entity_name-$bundle_name-";
+      $form['site_map_entities'][$entity_name][$bundle_name][$prefix . 'enable'] = array(
+        '#type' => 'checkbox',
+        '#title' => 'Enable',
+        '#default_value' => isset($settings_for_bundle['enable']) ? $settings_for_bundle['enable'] : FALSE,
+      );
+
+      $form['site_map_entities'][$entity_name][$bundle_name][$prefix . 'title'] = array(
+        '#type' => 'textfield',
+        '#title' => 'Title',
+        '#description' => 'Will be using for hierarchy and for main page to all entities of this bundle.',
+        '#default_value' => isset($settings_for_bundle['title']) ? $settings_for_bundle['title'] : '',
+      );
+
+      $form['site_map_entities'][$entity_name][$bundle_name][$prefix . 'link'] = array(
+        '#type' => 'textfield',
+        '#title' => 'Link for title',
+        '#default_value' => isset($settings_for_bundle['link']) ? $settings_for_bundle['link'] : '',
+      );
+
+      $form['site_map_entities'][$entity_name][$bundle_name][$prefix . 'type'] = array(
+        '#type' => 'select',
+        '#title' => 'Listing type',
+        '#description' => 'Select how to entities will be added to Site Map.',
+        '#options' => array(
+          SITE_MAP_ENTITIES_ADD_DEFAULT => '- Default -',
+          SITE_MAP_ENTITIES_ADD_ALL => 'Add all',
+          SITE_MAP_ENTITIES_ADD_UNCHECKED => 'Add all except checked',
+          SITE_MAP_ENTITIES_ADD_CHECKED => 'Add only checked',
+        ),
+        '#default_value' => isset($settings_for_bundle['type']) ? $settings_for_bundle['type'] : SITE_MAP_ENTITIES_ADD_DEFAULT,
+      );
+
+      $form['site_map_entities'][$entity_name][$bundle_name][$prefix . 'field'] = array(
+        '#type' => 'select',
+        '#title' => 'Field',
+        '#description' => 'Default field which will be using for restriction. Here is only appears boolean fields.',
+        '#options' => $boolean_fields,
+        '#default_value' => isset($settings_for_bundle['field']) ? $settings_for_bundle['field'] : SITE_MAP_ENTITIES_FIELD_DEFAULT,
+      );
+    }
+  }
+
+  $form['#submit'][] = 'site_map_entities_form_site_map_admin_settings_form_submit';
+}
+
+/**
+ * Submit handler for Site Maps ettings form.
+ */
+function site_map_entities_form_site_map_admin_settings_form_submit($form, &$form_state) {
+  $values = &$form_state['values'];
+  $site_map_entities_settings = array();
+  $site_map_entities_settings['defaults']['type'] = $values['site_map_entities_type'];
+  $site_map_entities_settings['defaults']['field'] = $values['site_map_entities_default_field'];
+
+  foreach ($values as $key => $value) {
+    if (preg_match("/^site_map_entities-(?# entity)([a-zA-Z0-9_]+)-(?# bundle)([a-zA-Z0-9_]+)-(?# setting)([a-zA-Z0-9_]+)$/", $key, $matches)) {
+      list($name, $entity, $bundle, $setting) = $matches;
+      $site_map_entities_settings['entities'][$entity][$bundle][$setting] = $value;
+    }
+  }
+  variable_set('site_map_entities_settings', $site_map_entities_settings);
+}
+
+/**
+ * Implements hook_site_map().
+ */
+function site_map_entities_site_map() {
+  $settings = variable_get('site_map_entities_settings', array());
+  $default_field = &$settings['defaults']['field'];
+  $default_type = &$settings['defaults']['type'];
+  $entities = &$settings['entities'];
+  $result = '';
+
+  foreach ($entities as $entity => $bundles) {
+    foreach ($bundles as $bundle => $bundle_settings) {
+      $items = array();
+
+      if ($bundle_settings['enable']) {
+        $field = NULL;
+        if ($bundle_settings['field'] == SITE_MAP_ENTITIES_FIELD_DEFAULT && $default_type != SITE_MAP_ENTITIES_FIELD_OFF) {
+          $field = $default_field;
+        }
+        elseif ($bundle_settings['field'] != SITE_MAP_ENTITIES_FIELD_OFF) {
+          $field = $bundle_settings['field'];
+        }
+
+        $query = new EntityFieldQuery;
+        $query->entityCondition('entity_type', $entity)
+          ->entityCondition('bundle', $bundle);
+        _site_map_entities_query_field_condition_switch($query, $bundle_settings['type'], $default_type, $field);
+        $query->propertyCondition('status', 1);
+        $query_results = $query->execute();
+
+        if (isset($query_results[$entity])) {
+          $entities_objects = entity_load($entity, array_keys($query_results[$entity]));
+          foreach ($entities_objects as $entity_object) {
+            $wrapper = entity_metadata_wrapper($entity, $entity_object);
+            $items[]['data'] = l($wrapper->label(), $wrapper->url->value(), array(
+              'attributes' => array(
+                'title' => $wrapper->label(),
+              ),
+            ));
+          }
+        }
+      }
+
+      if (!empty($items)) {
+        $title = NULL;
+        if ($bundle_settings['title'] && $bundle_settings['link']) {
+          $title = l($bundle_settings['title'], $bundle_settings['link']);
+          $old_items = $items;
+          $items = array();
+          $items[] = array(
+            'data' => $title,
+            'children' => $old_items,
+          );
+        }
+        $result .= theme('item_list', array(
+          'items' => $items,
+          'attributes' => array(
+            'class' => "$entity-$bundle",
+          ),
+        ));
+      }
+    }
+  }
+
+  return $result;
+}
+
+/**
+ * Helper to add field condition to query.
+ */
+function _site_map_entities_query_field_condition_switch(&$query, $type, $default_type, $field) {
+  switch ($type) {
+    case SITE_MAP_ENTITIES_ADD_CHECKED:
+      if ($field) {
+        $query->fieldCondition($field, 'value', '1');
+      }
+      break;
+
+    case SITE_MAP_ENTITIES_ADD_UNCHECKED:
+      if ($field) {
+        $query->fieldCondition($field, 'value', '0');
+      }
+      break;
+
+    case SITE_MAP_ENTITIES_ADD_DEFAULT:
+      _site_map_entities_query_field_condition_switch($query, $default_type, $default_type, $field);
+      break;
+
+    case SITE_MAP_ENTITIES_ADD_ALL:
+    default:
+      // For this we don't need to do anything.
+      break;
+  }
+}

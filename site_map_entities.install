@@ -1,0 +1,13 @@
+<?php
+
+/**
+ * @file
+ *   Installation process.
+ */
+
+/**
+ * Implements hook_entities_uninstall().
+ */
+function site_map_entities_uninstall() {
+  variable_del('site_map_entities_settings');
+}
